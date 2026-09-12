@@ -12,6 +12,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -32,10 +34,10 @@ jobs:
           sdkmanager \
             "platform-tools" \
             "build-tools;35.0.1" \
-            "platforms;android-35" \
-            "cmdline-tools;latest" \
-            "cmake;3.10.2.4988404" \
-            "ndk;28.1.13356709"
+            "platforms;android-35"
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
 
       - name: Download Godot 4.7.2
         shell: bash
@@ -50,10 +52,13 @@ jobs:
 
           unzip -q /tmp/godot.zip -d "$HOME/godot"
 
-          GODOT_BIN=$(find "$HOME/godot" -type f -name "Godot_v4.7.2-stable_linux.x86_64" | head -1)
+          GODOT_BIN=$(find "$HOME/godot" \
+            -type f \
+            -name "Godot_v4.7.2-stable_linux.x86_64" \
+            | head -1)
 
           if [ -z "$GODOT_BIN" ]; then
-            echo "Godot executable not found."
+            echo "ERROR: Godot executable not found."
             find "$HOME/godot" -maxdepth 3 -type f
             exit 1
           fi
@@ -64,12 +69,12 @@ jobs:
 
           "$GODOT_BIN" --version
 
-      - name: Install Godot Android Export Templates
+      - name: Install Godot Export Templates
         shell: bash
         run: |
           set -e
 
-          mkdir -p "$HOME/.local/share/godot/export_templates"
+          echo "=== Downloading export templates ==="
 
           wget -q \
             "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz" \
@@ -78,56 +83,42 @@ jobs:
           rm -rf /tmp/godot_templates
           mkdir -p /tmp/godot_templates
 
-          unzip -q /tmp/templates.tpz -d /tmp/godot_templates
+          unzip -q \
+            /tmp/templates.tpz \
+            -d /tmp/godot_templates
 
-          TEMPLATE_DIR=$(find /tmp/godot_templates \
-            -type d \
-            -name "4.7.2.stable" \
-            | head -1)
+          echo "=== Downloaded template files ==="
 
-          if [ -z "$TEMPLATE_DIR" ]; then
-            echo "Godot export templates were not found."
+          find /tmp/godot_templates \
+            -maxdepth 3 \
+            -type f \
+            | sort
 
-            find /tmp/godot_templates \
-              -maxdepth 5 \
-              -type f
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.7.2.stable"
 
-            exit 1
-          fi
+          rm -rf "$TEMPLATE_DIR"
+          mkdir -p "$TEMPLATE_DIR"
 
-          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          echo "=== Copying templates ==="
 
-          cp -a "$TEMPLATE_DIR"/. \
-            "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
+          cp -a \
+            /tmp/godot_templates/templates/. \
+            "$TEMPLATE_DIR/"
 
-          echo "=== Android Templates ==="
+          echo "4.7.2.stable" > "$TEMPLATE_DIR/version.txt"
 
-          ls -lh \
-            "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          echo "=== Installed templates ==="
 
-      - name: Configure Godot Android
-        shell: bash
-        run: |
-          set -e
+          ls -lh "$TEMPLATE_DIR"
 
-          mkdir -p "$HOME/.config/godot"
+          echo "=== Checking Android templates ==="
 
-          cat > "$HOME/.config/godot/editor_settings-4.7.tres" <<EOF
-          [gd_resource type="EditorSettings" format=3]
+          test -f "$TEMPLATE_DIR/android_debug.apk"
 
-          [resource]
+          test -f "$TEMPLATE_DIR/android_release.apk"
 
-          export/android/java_sdk_path = "$JAVA_HOME"
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          EOF
-
-          echo "=== Java ==="
-          java -version
-
-          echo "=== Android SDK ==="
-          echo "$ANDROID_HOME"
-
-          ls -la "$ANDROID_HOME"
+          echo "android_debug.apk FOUND"
+          echo "android_release.apk FOUND"
 
       - name: Extract Game
         shell: bash
@@ -135,7 +126,7 @@ jobs:
           set -e
 
           if [ ! -f "TukTukEscape-first-version.zip" ]; then
-            echo "TukTukEscape-first-version.zip was not found."
+            echo "ERROR: TukTukEscape-first-version.zip not found."
             exit 1
           fi
 
@@ -163,7 +154,7 @@ jobs:
 
           else
 
-            echo "Could not find the game inside the ZIP."
+            echo "ERROR: TukTukEscape folder was not found."
 
             find /tmp/tuktuk \
               -maxdepth 5 \
@@ -172,12 +163,107 @@ jobs:
             exit 1
           fi
 
-          echo "=== GAME FILES ==="
+          echo "=== Game files ==="
 
           find game/TukTukEscape \
             -maxdepth 4 \
             -type f \
             | sort
+
+      - name: Create Debug Keystore
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$HOME/.local/share/godot/keystores"
+
+          keytool \
+            -genkeypair \
+            -v \
+            -keystore "$HOME/.local/share/godot/keystores/debug.keystore" \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          echo "DEBUG_KEYSTORE=$HOME/.local/share/godot/keystores/debug.keystore" >> "$GITHUB_ENV"
+
+      - name: Initialize Godot
+        shell: bash
+        run: |
+          set -e
+
+          cd game/TukTukEscape
+
+          "$GODOT" \
+            --headless \
+            --path . \
+            --editor \
+            --quit
+
+          echo "=== Godot initialized ==="
+
+      - name: Configure Godot Android
+        shell: bash
+        run: |
+          set -e
+
+          SETTINGS="$HOME/.config/godot/editor_settings-4.7.tres"
+
+          if [ ! -f "$SETTINGS" ]; then
+            echo "ERROR: Godot editor settings were not created."
+            find "$HOME/.config/godot" -maxdepth 2 -type f || true
+            exit 1
+          fi
+
+          echo "=== Configuring Android paths ==="
+
+          if grep -q "export/android/java_sdk_path" "$SETTINGS"; then
+            sed -i \
+              "s|export/android/java_sdk_path.*|export/android/java_sdk_path = \"$JAVA_HOME\"|" \
+              "$SETTINGS"
+          else
+            echo "export/android/java_sdk_path = \"$JAVA_HOME\"" >> "$SETTINGS"
+          fi
+
+          if grep -q "export/android/android_sdk_path" "$SETTINGS"; then
+            sed -i \
+              "s|export/android/android_sdk_path.*|export/android/android_sdk_path = \"$ANDROID_HOME\"|" \
+              "$SETTINGS"
+          else
+            echo "export/android/android_sdk_path = \"$ANDROID_HOME\"" >> "$SETTINGS"
+          fi
+
+          if grep -q "export/android/debug_keystore" "$SETTINGS"; then
+            sed -i \
+              "s|export/android/debug_keystore.*|export/android/debug_keystore = \"$DEBUG_KEYSTORE\"|" \
+              "$SETTINGS"
+          else
+            echo "export/android/debug_keystore = \"$DEBUG_KEYSTORE\"" >> "$SETTINGS"
+          fi
+
+          if grep -q "export/android/debug_keystore_user" "$SETTINGS"; then
+            sed -i \
+              "s|export/android/debug_keystore_user.*|export/android/debug_keystore_user = \"androiddebugkey\"|" \
+              "$SETTINGS"
+          else
+            echo "export/android/debug_keystore_user = \"androiddebugkey\"" >> "$SETTINGS"
+          fi
+
+          if grep -q "export/android/debug_keystore_pass" "$SETTINGS"; then
+            sed -i \
+              "s|export/android/debug_keystore_pass.*|export/android/debug_keystore_pass = \"android\"|" \
+              "$SETTINGS"
+          else
+            echo "export/android/debug_keystore_pass = \"android\"" >> "$SETTINGS"
+          fi
+
+          echo "=== Android settings ==="
+
+          grep "export/android/" "$SETTINGS" || true
 
       - name: Create Android Export Preset
         shell: bash
@@ -186,23 +272,20 @@ jobs:
 
           cd game/TukTukEscape
 
-          cat > export_presets.cfg <<'EOF'
-          [preset.0]
+          python3 - <<'PY'
+          preset = '''[preset.0]
 
           name="Android"
           platform="Android"
           runnable=true
-          advanced_options=false
           dedicated_server=false
           custom_features=""
           export_filter="all_resources"
           include_filter=""
           exclude_filter=""
           export_path="build/TukTukEscape.apk"
-          patches=PackedStringArray()
           encryption_include_filters=""
           encryption_exclude_filters=""
-          seed=0
           encrypt_pck=false
           encrypt_directory=false
           script_export_mode=2
@@ -213,13 +296,7 @@ jobs:
           custom_template/release=""
 
           gradle_build/use_gradle_build=false
-          gradle_build/gradle_build_directory=""
-          gradle_build/android_source_template=""
-          gradle_build/compress_native_libraries=false
           gradle_build/export_format=0
-          gradle_build/min_sdk=""
-          gradle_build/target_sdk=""
-          gradle_build/custom_theme_attributes={}
 
           architectures/armeabi-v7a=false
           architectures/arm64-v8a=true
@@ -237,21 +314,18 @@ jobs:
           package/retain_data_on_uninstall=false
           package/exclude_from_recents=false
           package/show_in_android_tv=false
-          package/show_in_app_library=true
           package/show_as_launcher_app=true
+          package/show_in_app_library=true
 
           launcher_icons/main_192x192=""
-
           launcher_icons/adaptive_foreground_432x432=""
           launcher_icons/adaptive_background_432x432=""
-          launcher_icons/adaptive_monochrome_432x432=""
 
           graphics/opengl_debug=false
 
           xr_features/xr_mode=0
 
           screen/immersive_mode=true
-          screen/edge_to_edge=false
           screen/support_small=true
           screen/support_normal=true
           screen/support_large=true
@@ -274,12 +348,17 @@ jobs:
           keystore/release_password=""
 
           one_click_deploy/clear_previous_install=false
-          EOF
+          '''
 
-          echo "=== EXPORT PRESET ==="
+          with open("export_presets.cfg", "w") as f:
+              f.write(preset.lstrip())
+          PY
+
+          echo "=== Export preset ==="
+
           cat export_presets.cfg
 
-      - name: Validate Godot Project
+      - name: Validate Project
         shell: bash
         run: |
           set -e
@@ -292,7 +371,9 @@ jobs:
             --editor \
             --quit
 
-      - name: Build APK
+          echo "=== Project validation completed ==="
+
+      - name: Build Android APK
         shell: bash
         run: |
           set -e
@@ -301,7 +382,7 @@ jobs:
 
           mkdir -p build
 
-          echo "=== STARTING ANDROID BUILD ==="
+          echo "=== STARTING ANDROID EXPORT ==="
 
           "$GODOT" \
             --headless \
@@ -311,7 +392,7 @@ jobs:
             "Android" \
             "build/TukTukEscape.apk"
 
-          echo "=== BUILD FINISHED ==="
+          echo "=== APK BUILD COMPLETE ==="
 
           ls -lh build/
 
@@ -320,15 +401,18 @@ jobs:
         run: |
           set -e
 
-          if [ ! -f "game/TukTukEscape/build/TukTukEscape.apk" ]; then
-            echo "APK was not created."
+          APK="game/TukTukEscape/build/TukTukEscape.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not created."
             exit 1
           fi
 
-          echo "APK successfully created."
+          echo "================================"
+          echo "APK CREATED SUCCESSFULLY"
+          echo "================================"
 
-          ls -lh \
-            game/TukTukEscape/build/TukTukEscape.apk
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
