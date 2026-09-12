@@ -87,7 +87,7 @@ jobs:
             /tmp/templates.tpz \
             -d /tmp/godot_templates
 
-          echo "=== Downloaded template files ==="
+          echo "=== Downloaded templates ==="
 
           find /tmp/godot_templates \
             -maxdepth 3 \
@@ -99,8 +99,6 @@ jobs:
           rm -rf "$TEMPLATE_DIR"
           mkdir -p "$TEMPLATE_DIR"
 
-          echo "=== Copying templates ==="
-
           cp -a \
             /tmp/godot_templates/templates/. \
             "$TEMPLATE_DIR/"
@@ -111,11 +109,15 @@ jobs:
 
           ls -lh "$TEMPLATE_DIR"
 
-          echo "=== Checking Android templates ==="
+          if [ ! -f "$TEMPLATE_DIR/android_debug.apk" ]; then
+            echo "ERROR: android_debug.apk not found."
+            exit 1
+          fi
 
-          test -f "$TEMPLATE_DIR/android_debug.apk"
-
-          test -f "$TEMPLATE_DIR/android_release.apk"
+          if [ ! -f "$TEMPLATE_DIR/android_release.apk" ]; then
+            echo "ERROR: android_release.apk not found."
+            exit 1
+          fi
 
           echo "android_debug.apk FOUND"
           echo "android_release.apk FOUND"
@@ -170,6 +172,47 @@ jobs:
             -type f \
             | sort
 
+      - name: Enable Android Texture Compression
+        shell: bash
+        run: |
+          set -e
+
+          cd game/TukTukEscape
+
+          if [ ! -f "project.godot" ]; then
+            echo "ERROR: project.godot not found."
+            exit 1
+          fi
+
+          echo "=== Enabling ETC2/ASTC ==="
+
+          if grep -q \
+            "textures/vram_compression/import_etc2_astc" \
+            project.godot; then
+
+            sed -i \
+              's|textures/vram_compression/import_etc2_astc.*|textures/vram_compression/import_etc2_astc=true|' \
+              project.godot
+
+          else
+
+            cat >> project.godot <<'EOF'
+
+[rendering]
+
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/canvas_textures/default_texture_filter=0
+textures/vram_compression/import_etc2_astc=true
+EOF
+
+          fi
+
+          echo "=== Checking project setting ==="
+
+          grep \
+            "import_etc2_astc" \
+            project.godot || true
+
       - name: Create Debug Keystore
         shell: bash
         run: |
@@ -215,7 +258,11 @@ jobs:
 
           if [ ! -f "$SETTINGS" ]; then
             echo "ERROR: Godot editor settings were not created."
-            find "$HOME/.config/godot" -maxdepth 2 -type f || true
+
+            find "$HOME/.config/godot" \
+              -maxdepth 2 \
+              -type f || true
+
             exit 1
           fi
 
@@ -355,7 +402,6 @@ jobs:
           PY
 
           echo "=== Export preset ==="
-
           cat export_presets.cfg
 
       - name: Validate Project
