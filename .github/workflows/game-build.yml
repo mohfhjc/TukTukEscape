@@ -1,0 +1,155 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "TukTukEscape-first-version.zip"
+      - ".github/workflows/game-build.yml"
+      - "game/**"
+
+jobs:
+  setup-and-build:
+    runs-on: ubuntu-24.04
+
+    container:
+      image: barichello/godot-ci:4.6.3
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Godot Android
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== Java ==="
+          java -version
+
+          echo "=== Android SDK ==="
+          ls -la /usr/lib/android-sdk
+
+          echo "=== Godot Export Templates ==="
+          ls -la /root/.local/share/godot/export_templates/ || true
+
+          mkdir -p "$HOME/.config"
+          mkdir -p "$HOME/.local/share/godot/export_templates"
+
+          if [ -d "/root/.config/godot" ]; then
+            rm -rf "$HOME/.config/godot"
+            cp -a /root/.config/godot "$HOME/.config/godot"
+          fi
+
+          if [ -d "/root/.local/share/godot/export_templates/4.6.3.stable" ]; then
+            rm -rf "$HOME/.local/share/godot/export_templates/4.6.3.stable"
+            cp -a \
+              /root/.local/share/godot/export_templates/4.6.3.stable \
+              "$HOME/.local/share/godot/export_templates/4.6.3.stable"
+          else
+            echo "ERROR: Export templates not found."
+            exit 1
+          fi
+
+      - name: Extract Game
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf game/TukTukEscape
+          mkdir -p game/TukTukEscape
+
+          if [ ! -f "TukTukEscape-first-version.zip" ]; then
+            echo "ERROR: ZIP file not found."
+            exit 1
+          fi
+
+          rm -rf /tmp/tuktuk
+          mkdir -p /tmp/tuktuk
+
+          unzip -o "TukTukEscape-first-version.zip" -d /tmp/tuktuk
+
+          if [ -d "/tmp/tuktuk/game/TukTukEscape" ]; then
+            cp -a /tmp/tuktuk/game/TukTukEscape/. game/TukTukEscape/
+          elif [ -d "/tmp/tuktuk/TukTukEscape" ]; then
+            cp -a /tmp/tuktuk/TukTukEscape/. game/TukTukEscape/
+          else
+            echo "ERROR: Game folder not found."
+            find /tmp/tuktuk -maxdepth 4 -type f
+            exit 1
+          fi
+
+          echo "=== GAME FILES ==="
+          find game/TukTukEscape -maxdepth 3 -type f | sort
+
+      - name: Create Android Export Preset
+        shell: bash
+        run: |
+          set -e
+
+          cd game/TukTukEscape
+
+          echo "=== Creating export_presets.cfg ==="
+
+          echo 'W3ByZXNldC4wXQoKbmFtZT0iQW5kcm9pZCBEZWJ1ZyIKcGxhdGZvcm09IkFuZHJvaWQiCnJ1bm5hYmxlPXRydWUKZGVkaWNhdGVkX3NlcnZlcj1mYWxzZQpjdXN0b21fZmVhdHVyZXM9IiIKZXhwb3J0X2ZpbHRlcj0iYWxsX3Jlc291cmNlcyIKaW5jbHVkZV9maWx0ZXI9IiIKZXhjbHVkZV9maWx0ZXI9IiIKZXhwb3J0X3BhdGg9IiIKZW5jcnlwdGlvbl9pbmNsdWRlX2ZpbHRlcnM9IiIKZW5jcnlwdGlvbl9leGNsdWRlX2ZpbHRlcnM9IiIKZW5jcnlwdF9wY2s9ZmFsc2UKZW5jcnlwdF9kaXJlY3Rvcnk9ZmFsc2UKc2NyaXB0X2V4cG9ydF9tb2RlPTIKCltwcmVzZXQuMC5vcHRpb25zXQoKY3VzdG9tX3RlbXBsYXRlL2RlYnVnPSIiCmN1c3RvbV90ZW1wbGF0ZS9yZWxlYXNlPSIiCgpncmFkbGVfYnVpbGQvdXNlX2dyYWRsZV9idWlsZD1mYWxzZQpncmFkbGVfYnVpbGQvZXhwb3J0X2Zvcm1hdD0wCgphcmNoaXRlY3R1cmVzL2FybWVhYmktdjdhPWZhbHNlCmFyY2hpdGVjdHVyZXMvYXJtNjQtdjhhPXRydWUKYXJjaGl0ZWN0dXJlcy94ODY9ZmFsc2UKYXJjaGl0ZWN0dXJlcy94ODZfNjQ9ZmFsc2UKCnZlcnNpb24vY29kZT0xCnZlcnNpb24vbmFtZT0iMS4wIgoKcGFja2FnZS91bmlxdWVfbmFtZT0iY29tLm1vaGZqYy50dWt0dWtlc2NhcGUiCnBhY2thZ2UvbmFtZT0iVHVrVHVrIEVzY2FwZSIKcGFja2FnZS9zaWduZWQ9dHJ1ZQoKcGFja2FnZS9hcHBfY2F0ZWdvcnk9MgpwYWNrYWdlL3JldGFpbl9kYXRhX29uX3VuaW5zdGFsbD1mYWxzZQpwYWNrYWdlL2V4Y2x1ZGVfZnJvbV9yZWNlbnRzPWZhbHNlCnBhY2thZ2Uvc2hvd19pbl9hbmRyb2lkX3R2PWZhbHNlCnBhY2thZ2Uvc2hvd19hc19sYXVuY2hlcl9hcHA9dHJ1ZQpwYWNrYWdlL3Nob3dfaW5fYXBwX2xpYnJhcnk9dHJ1ZQoKbGF1bmNoZXJfaWNvbnMvbWFpbl8xOTJ4MTkyPSIiCmxhdW5jaGVyX2ljb25zL2FkYXB0aXZlX2ZvcmVncm91bmRfNDMyeDQzMj0iIgpsYXVuY2hlcl9pY29ucy9hZGFwdGl2ZV9iYWNrZ3JvdW5kXzQzMng0MzI9IiIKCmdyYXBoaWNzL29wZW5nbF9kZWJ1Zz1mYWxzZQoKeHJfZmVhdHVyZXMveHJfbW9kZT0wCgpzY3JlZW4vaW1tZXJzaXZlX21vZGU9dHJ1ZQpzY3JlZW4vc3VwcG9ydF9zbWFsbD10cnVlCnNjcmVlbi9zdXBwb3J0X25vcm1hbD10cnVlCnNjcmVlbi9zdXBwb3J0X2xhcmdlPXRydWUKc2NyZWVuL3N1cHBvcnRfeGxhcmdlPXRydWUKCnVzZXJfZGF0YV9iYWNrdXAvYWxsb3c9ZmFsc2UKCmNvbW1hbmRfbGluZS9leHRyYV9hcmdzPSIiCgphcGtfZXhwYW5zaW9uL2VuYWJsZT1mYWxzZQoKcGVybWlzc2lvbnMvY3VzdG9tX3Blcm1pc3Npb25zPVBhY2tlZFN0cmluZ0FycmF5KCkKCmtleXN0b3JlL2RlYnVnPSIvcm9vdC9kZWJ1Zy5rZXlzdG9yZSIKa2V5c3RvcmUvZGVidWdfdXNlcj0iYW5kcm9pZGRlYnVna2V5IgprZXlzdG9yZS9kZWJ1Z19wYXNzd29yZD0iYW5kcm9pZCIKCmtleXN0b3JlL3JlbGVhc2U9IiIKa2V5c3RvcmUvcmVsZWFzZV91c2VyPSIiCmtleXN0b3JlL3JlbGVhc2VfcGFzc3dvcmQ9IiIKCm9uZV9jbGlja19kZXBsb3kvY2xlYXJfcHJldmlvdXNfaW5zdGFsbD1mYWxzZQo=' | base64 -d > export_presets.cfg
+
+          echo "=== Export preset created ==="
+          cat export_presets.cfg
+
+      - name: Validate Project
+        shell: bash
+        run: |
+          set -e
+
+          cd game/TukTukEscape
+
+          godot \
+            --headless \
+            --path . \
+            --editor \
+            --quit
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          set -e
+
+          cd game/TukTukEscape
+
+          mkdir -p ../../build/android
+
+          echo "=== BUILDING APK ==="
+
+          godot \
+            --headless \
+            --verbose \
+            --path . \
+            --export-debug \
+            "Android Debug" \
+            "../../build/android/TukTukEscape-debug.apk"
+
+          echo "=== BUILD COMPLETE ==="
+
+          ls -lh ../../build/android/
+
+      - name: Check APK
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "build/android/TukTukEscape-debug.apk" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
+
+          echo "=== APK SUCCESS ==="
+          ls -lh build/android/TukTukEscape-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TukTukEscape-Android
+          path: build/android/TukTukEscape-debug.apk
